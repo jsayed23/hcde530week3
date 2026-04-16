@@ -5,16 +5,14 @@ import sys
 
 
 # Get the directory where this script is located
-# This lets the script reliably find input/output files in the same folder
 BASE_DIR = Path(__file__).resolve().parent
 
-# File paths for input and output CSV files
+# File paths
 INPUT_FILE = BASE_DIR / "week3_survey_messy.csv"
 CLEANED_FILE = BASE_DIR / "week3_survey_cleaned.csv"
 ROLE_COUNTS_FILE = BASE_DIR / "week3_role_counts.csv"
 
-# Dictionary that maps written numbers (e.g., "five") to integers
-# This helps clean messy survey data where users typed numbers as words
+# Dictionary for converting word numbers to integers
 NUMBER_WORDS = {
     "zero": 0,
     "one": 1,
@@ -40,19 +38,15 @@ NUMBER_WORDS = {
 }
 
 
-# Convert numeric values stored as text into integers
-# Handles values like "5", "five", or "twenty"
-# Returns None if the value cannot be converted
+# Convert numeric text to integer
 def parse_int_flexible(raw_value: str) -> int | None:
     value = (raw_value or "").strip()
     if not value:
         return None
 
-    # If the value is already numeric (e.g., "5")
     if value.isdigit():
         return int(value)
 
-    # Normalize text values like "five" or "twenty-one"
     normalized = value.lower().replace("-", " ")
     if normalized in NUMBER_WORDS:
         return NUMBER_WORDS[normalized]
@@ -60,32 +54,66 @@ def parse_int_flexible(raw_value: str) -> int | None:
     return None
 
 
+# Clean role values (NEW FUNCTION)
 def clean_role(raw_role: str) -> str:
     """
     Standardize a participant role value.
 
     Parameters:
-        raw_role (str): The original role value from the CSV row.
+        raw_role (str): Original role value from CSV.
 
     Returns:
-        str: A cleaned role string with leading/trailing spaces removed
-        and converted to uppercase. Returns an empty string if the input
-        is missing or blank.
+        str: Cleaned role (trimmed and uppercase).
     """
     return (raw_role or "").strip().upper()
 
 
-# Load the CSV file and perform basic cleaning
+# NEW FUNCTION: dataset summary
+def summarize_data(rows: list[dict]) -> dict:
+    """
+    Create a plain-language summary of the cleaned dataset.
+
+    Includes:
+    - total row count
+    - unique roles
+    - number of empty name fields
+
+    Parameters:
+        rows (list[dict]): Cleaned survey data
+
+    Returns:
+        dict: Summary statistics
+    """
+
+    row_count = len(rows)
+    unique_roles = set()
+    empty_name_count = 0
+
+    for row in rows:
+        role = (row.get("role") or "").strip()
+        if role:
+            unique_roles.add(role)
+
+        name = (row.get("participant_name") or "").strip()
+        if not name:
+            empty_name_count += 1
+
+    return {
+        "row_count": row_count,
+        "unique_roles": sorted(unique_roles),
+        "empty_name_count": empty_name_count,
+    }
+
+
+# Load + clean dataset
 def load_and_clean_rows(input_file: str) -> tuple[list[dict], list[str]]:
     with open(input_file, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         fieldnames = reader.fieldnames
 
-        # Ensure the CSV has a header row
         if not fieldnames:
             raise ValueError("Input CSV has no header row.")
 
-        # Verify that required columns exist in the dataset
         required = {
             "response_id",
             "participant_name",
@@ -96,25 +124,17 @@ def load_and_clean_rows(input_file: str) -> tuple[list[dict], list[str]]:
 
         missing = sorted(required - set(fieldnames))
         if missing:
-            raise ValueError(
-                f"Input CSV is missing required columns: {', '.join(missing)}"
-            )
+            raise ValueError(f"Missing columns: {', '.join(missing)}")
 
         cleaned_rows = []
 
-        # Loop through each row in the CSV and clean the values
         for row in reader:
-            # Remove extra spaces from participant name
             name_value = (row.get("participant_name") or "").strip()
 
-            # Skip rows with no participant name
             if not name_value:
                 continue
 
-            # Standardize the participant name
             row["participant_name"] = name_value
-
-            # Use helper function to standardize the role value
             row["role"] = clean_role(row.get("role"))
 
             cleaned_rows.append(row)
@@ -122,16 +142,15 @@ def load_and_clean_rows(input_file: str) -> tuple[list[dict], list[str]]:
         return cleaned_rows, fieldnames
 
 
-# Write the cleaned survey data into a new CSV file
+# Write cleaned CSV
 def write_cleaned_rows(rows: list[dict], fieldnames: list[str], output_file: str) -> None:
     with open(output_file, "w", newline="", encoding="utf-8") as out:
         writer = csv.DictWriter(out, fieldnames=fieldnames)
-
         writer.writeheader()
         writer.writerows(rows)
 
 
-# Count how many responses belong to each role
+# Count roles
 def count_roles(rows: list[dict]) -> Counter:
     counts = Counter()
 
@@ -143,25 +162,24 @@ def count_roles(rows: list[dict]) -> Counter:
     return counts
 
 
-# Save role counts to a CSV file for analysis
+# Save role counts
 def write_role_counts(counts: Counter, output_file: str) -> None:
     with open(output_file, "w", newline="", encoding="utf-8") as out:
         writer = csv.writer(out)
-
         writer.writerow(["role", "count"])
 
         for role, count in sorted(counts.items()):
             writer.writerow([role, count])
 
 
-# Print role counts to the terminal
+# Print role counts
 def print_role_counts(counts: Counter) -> None:
     print("Responses by role:")
     for role, count in sorted(counts.items()):
         print(f"  {role}: {count}")
 
 
-# Calculate and print the average years of experience
+# Average experience
 def print_average_experience(rows: list[dict]) -> None:
     numeric_values = []
     invalid_rows = []
@@ -176,46 +194,44 @@ def print_average_experience(rows: list[dict]) -> None:
             invalid_rows.append((row.get("response_id", "UNKNOWN"), value.strip()))
 
     if numeric_values:
-        avg_experience = sum(numeric_values) / len(numeric_values)
-        print(f"\nAverage years of experience: {avg_experience:.1f}")
+        avg = sum(numeric_values) / len(numeric_values)
+        print(f"\nAverage years of experience: {avg:.1f}")
     else:
-        print("\nAverage years of experience: N/A (no valid numeric values)")
+        print("\nAverage years of experience: N/A")
 
     if invalid_rows:
-        print("\nInvalid experience_years values (ignored):")
-        for response_id, value in invalid_rows:
-            print(f"  {response_id}: {value}")
+        print("\nInvalid experience values:")
+        for rid, val in invalid_rows:
+            print(f"  {rid}: {val}")
 
 
-# Identify the top 5 highest satisfaction scores
+# Top satisfaction
 def print_top_5_satisfaction(rows: list[dict]) -> None:
     scored_rows = []
     invalid_rows = []
 
     for row in rows:
-        score_value = row.get("satisfaction_score") or ""
-        parsed = parse_int_flexible(score_value)
+        value = row.get("satisfaction_score") or ""
+        parsed = parse_int_flexible(value)
 
         if parsed is not None:
             scored_rows.append((row["participant_name"], parsed))
-        elif score_value.strip():
-            invalid_rows.append((row.get("response_id", "UNKNOWN"), score_value.strip()))
+        elif value.strip():
+            invalid_rows.append((row.get("response_id", "UNKNOWN"), value.strip()))
 
     scored_rows.sort(key=lambda x: x[1], reverse=True)
 
-    top5 = scored_rows[:5]
-
     print("\nTop 5 satisfaction scores:")
-    for name, score in top5:
+    for name, score in scored_rows[:5]:
         print(f"  {name}: {score}")
 
     if invalid_rows:
-        print("\nInvalid satisfaction_score values (ignored):")
-        for response_id, value in invalid_rows:
-            print(f"  {response_id}: {value}")
+        print("\nInvalid satisfaction values:")
+        for rid, val in invalid_rows:
+            print(f"  {rid}: {val}")
 
 
-# Main function that runs the full data cleaning pipeline
+# MAIN
 def main() -> None:
     try:
         rows, fieldnames = load_and_clean_rows(INPUT_FILE)
@@ -223,20 +239,25 @@ def main() -> None:
         write_cleaned_rows(rows, fieldnames, CLEANED_FILE)
 
         role_counts = count_roles(rows)
-
         print_role_counts(role_counts)
-
         write_role_counts(role_counts, ROLE_COUNTS_FILE)
 
         print_average_experience(rows)
         print_top_5_satisfaction(rows)
 
+        # NEW: dataset summary
+        summary = summarize_data(rows)
+
+        print("\nDataset Summary:")
+        print(f"  Row count: {summary['row_count']}")
+        print(f"  Unique roles: {', '.join(summary['unique_roles'])}")
+        print(f"  Empty name fields: {summary['empty_name_count']}")
+
         print(f"\nCleaned data written to {CLEANED_FILE}")
         print(f"Role counts written to {ROLE_COUNTS_FILE}")
 
     except FileNotFoundError:
-        print(f"ERROR: Input file not found: {INPUT_FILE}")
-        print("Make sure week3_survey_messy.csv is in the same folder as this script.")
+        print(f"ERROR: Missing file {INPUT_FILE}")
         sys.exit(1)
 
     except ValueError as exc:
@@ -244,10 +265,9 @@ def main() -> None:
         sys.exit(1)
 
     except csv.Error as exc:
-        print(f"ERROR: CSV parsing failed: {exc}")
+        print(f"ERROR: CSV issue: {exc}")
         sys.exit(1)
 
 
-# Run the program only when the script is executed directly
 if __name__ == "__main__":
     main()
