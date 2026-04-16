@@ -1,0 +1,188 @@
+import csv
+from collections import Counter
+from pathlib import Path
+import sys
+
+
+BASE_DIR = Path(__file__).resolve().parent
+INPUT_FILE = BASE_DIR / "week3_survey_messy.csv"
+CLEANED_FILE = BASE_DIR / "week3_survey_cleaned.csv"
+ROLE_COUNTS_FILE = BASE_DIR / "week3_role_counts.csv"
+NUMBER_WORDS = {
+    "zero": 0,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+}
+
+
+def parse_int_flexible(raw_value: str) -> int | None:
+    value = (raw_value or "").strip()
+    if not value:
+        return None
+
+    if value.isdigit():
+        return int(value)
+
+    normalized = value.lower().replace("-", " ")
+    if normalized in NUMBER_WORDS:
+        return NUMBER_WORDS[normalized]
+
+    return None
+
+
+def load_and_clean_rows(input_file: str) -> tuple[list[dict], list[str]]:
+    with open(input_file, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames
+
+        if not fieldnames:
+            raise ValueError("Input CSV has no header row.")
+        required = {
+            "response_id",
+            "participant_name",
+            "role",
+            "experience_years",
+            "satisfaction_score",
+        }
+        missing = sorted(required - set(fieldnames))
+        if missing:
+            raise ValueError(
+                f"Input CSV is missing required columns: {', '.join(missing)}"
+            )
+
+        cleaned_rows = []
+        for row in reader:
+            name_value = (row.get("participant_name") or "").strip()
+            if not name_value:
+                continue
+
+            row["participant_name"] = name_value
+            row["role"] = (row.get("role") or "").strip().upper()
+            cleaned_rows.append(row)
+
+        return cleaned_rows, fieldnames
+
+
+def write_cleaned_rows(rows: list[dict], fieldnames: list[str], output_file: str) -> None:
+    with open(output_file, "w", newline="", encoding="utf-8") as out:
+        writer = csv.DictWriter(out, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def count_roles(rows: list[dict]) -> Counter:
+    counts = Counter()
+    for row in rows:
+        role = (row.get("role") or "").strip()
+        if role:
+            counts[role] += 1
+    return counts
+
+
+def write_role_counts(counts: Counter, output_file: str) -> None:
+    with open(output_file, "w", newline="", encoding="utf-8") as out:
+        writer = csv.writer(out)
+        writer.writerow(["role", "count"])
+        for role, count in sorted(counts.items()):
+            writer.writerow([role, count])
+
+
+def print_role_counts(counts: Counter) -> None:
+    print("Responses by role:")
+    for role, count in sorted(counts.items()):
+        print(f"  {role}: {count}")
+
+
+def print_average_experience(rows: list[dict]) -> None:
+    numeric_values = []
+    invalid_rows = []
+    for row in rows:
+        value = row.get("experience_years") or ""
+        parsed = parse_int_flexible(value)
+        if parsed is not None:
+            numeric_values.append(parsed)
+        elif value.strip():
+            invalid_rows.append((row.get("response_id", "UNKNOWN"), value.strip()))
+
+    if numeric_values:
+        avg_experience = sum(numeric_values) / len(numeric_values)
+        print(f"\nAverage years of experience: {avg_experience:.1f}")
+    else:
+        print("\nAverage years of experience: N/A (no valid numeric values)")
+
+    if invalid_rows:
+        print("\nInvalid experience_years values (ignored):")
+        for response_id, value in invalid_rows:
+            print(f"  {response_id}: {value}")
+
+
+def print_top_5_satisfaction(rows: list[dict]) -> None:
+    scored_rows = []
+    invalid_rows = []
+    for row in rows:
+        score_value = row.get("satisfaction_score") or ""
+        parsed = parse_int_flexible(score_value)
+        if parsed is not None:
+            scored_rows.append((row["participant_name"], parsed))
+        elif score_value.strip():
+            invalid_rows.append((row.get("response_id", "UNKNOWN"), score_value.strip()))
+
+    scored_rows.sort(key=lambda x: x[1], reverse=True)
+    top5 = scored_rows[:5]
+
+    print("\nTop 5 satisfaction scores:")
+    for name, score in top5:
+        print(f"  {name}: {score}")
+
+    if invalid_rows:
+        print("\nInvalid satisfaction_score values (ignored):")
+        for response_id, value in invalid_rows:
+            print(f"  {response_id}: {value}")
+
+
+def main() -> None:
+    try:
+        rows, fieldnames = load_and_clean_rows(INPUT_FILE)
+        write_cleaned_rows(rows, fieldnames, CLEANED_FILE)
+
+        role_counts = count_roles(rows)
+        print_role_counts(role_counts)
+        write_role_counts(role_counts, ROLE_COUNTS_FILE)
+
+        print_average_experience(rows)
+        print_top_5_satisfaction(rows)
+
+        print(f"\nCleaned data written to {CLEANED_FILE}")
+        print(f"Role counts written to {ROLE_COUNTS_FILE}")
+    except FileNotFoundError:
+        print(f"ERROR: Input file not found: {INPUT_FILE}")
+        print("Make sure week3_survey_messy.csv is in the same folder as this script.")
+        sys.exit(1)
+    except ValueError as exc:
+        print(f"ERROR: {exc}")
+        sys.exit(1)
+    except csv.Error as exc:
+        print(f"ERROR: CSV parsing failed: {exc}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
